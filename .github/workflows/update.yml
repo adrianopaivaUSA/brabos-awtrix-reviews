@@ -1,0 +1,4 @@
+name: Atualizar reviews no relogio
+on: {schedule: [{cron: '*/30 * * * *'}], workflow_dispatch: null}
+permissions: {contents: write}
+jobs: {update: {runs-on: ubuntu-latest, steps: [{uses: actions/checkout@v4}, {name: Atualizar relogio, env: {FLESPI_TOKEN: "${{ secrets.FLESPI_TOKEN }}"}, run: python3 update_reviews.py}, {uses: gautamkrishnar/keepalive-workflow@v2}]}}

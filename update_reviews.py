@@ -10,6 +10,7 @@ import json
 import os
 import re
 import sys
+import time
 import urllib.request
 
 SITE = "https://braboscleaning.com/"
@@ -36,7 +37,11 @@ FONT = {
 
 
 def get_count():
-    req = urllib.request.Request(SITE, headers={"User-Agent": "Mozilla/5.0"})
+    # query unica para furar o cache (LiteSpeed) e ler a versao fresca
+    url = f"{SITE}?nocache={int(time.time())}"
+    req = urllib.request.Request(
+        url, headers={"User-Agent": "Mozilla/5.0", "Cache-Control": "no-cache"}
+    )
     html = urllib.request.urlopen(req, timeout=30).read().decode("utf-8", "ignore")
     m = re.search(r"(\d{2,4})\+?\s*Five-Star", html) or re.search(
         r"With (\d{2,4}) five-star", html, re.I

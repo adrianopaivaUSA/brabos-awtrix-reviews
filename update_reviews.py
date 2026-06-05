@@ -3,6 +3,8 @@
 e publica no relogio Ulanzi/AWTRIX via flespi MQTT (REST).
 
 Roda no GitHub Actions a cada 30 minutos. Sem dependencias externas.
+Mensagens publicadas como "retained": o broker guarda a ultima e
+entrega na hora quando o relogio liga/reconecta.
 """
 import json
 import os
@@ -59,7 +61,9 @@ def build_draw(num):
 
 
 def publish(topic, payload):
-    body = json.dumps({"topic": topic, "payload": json.dumps(payload)}).encode()
+    body = json.dumps(
+        {"topic": topic, "payload": json.dumps(payload), "retained": True}
+    ).encode()
     req = urllib.request.Request(
         "https://flespi.io/mqtt/messages",
         data=body,

@@ -4,7 +4,8 @@
 Ulanzi/AWTRIX via flespi MQTT (REST).
 
 Roda no GitHub Actions a cada 30 minutos. Sem dependencias externas.
-Se a API falhar, NAO publica: a mensagem retida anterior continua na tela
+Tenta a Places API legacy; se a key so tiver a New, cai no endpoint novo.
+Se tudo falhar, NAO publica: a mensagem retida anterior continua na tela
 (nunca mostra numero velho como se fosse o atual).
 """
 import json
@@ -42,16 +43,40 @@ FONT = {
 }
 
 
-def place_total(place_id):
-    """user_ratings_total de um place_id (levanta excecao se falhar)."""
+def _total_legacy(place_id):
     url = "https://maps.googleapis.com/maps/api/place/details/json?" + urllib.parse.urlencode(
         {"place_id": place_id, "fields": "user_ratings_total", "key": GOOGLE_KEY}
     )
     req = urllib.request.Request(url, headers={"User-Agent": "brabos-awtrix"})
     data = json.loads(urllib.request.urlopen(req, timeout=30).read().decode())
     if data.get("status") != "OK":
-        raise RuntimeError(f"Places API status={data.get('status')} ({place_id})")
+        raise RuntimeError(f"legacy status={data.get('status')}")
     return int(data["result"]["user_ratings_total"])
+
+
+def _total_new(place_id):
+    url = f"https://places.googleapis.com/v1/places/{place_id}"
+    req = urllib.request.Request(
+        url,
+        headers={
+            "X-Goog-Api-Key": GOOGLE_KEY,
+            "X-Goog-FieldMask": "userRatingCount",
+            "User-Agent": "brabos-awtrix",
+        },
+    )
+    data = json.loads(urllib.request.urlopen(req, timeout=30).read().decode())
+    return int(data["userRatingCount"])
+
+
+def place_total(place_id):
+    """Tenta legacy; se falhar, tenta New. Levanta excecao se as duas falharem."""
+    try:
+        return _total_legacy(place_id)
+    except Exception as e_legacy:
+        try:
+            return _total_new(place_id)
+        except Exception as e_new:
+            raise RuntimeError(f"legacy+new falharam ({place_id}): {e_legacy} | {e_new}")
 
 
 def get_count():

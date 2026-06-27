@@ -1,26 +1,32 @@
 #!/usr/bin/env python3
-"""Busca a contagem de Google Reviews na home do braboscleaning.com
-e publica no relogio Ulanzi/AWTRIX via flespi MQTT (REST).
+"""Busca a contagem REAL de Google Reviews somando os 3 perfis do BraBos
+(Boston, Newton, Cambridge) via Google Places API e publica no relogio
+Ulanzi/AWTRIX via flespi MQTT (REST).
 
 Roda no GitHub Actions a cada 30 minutos. Sem dependencias externas.
-Mensagens publicadas como "retained": o broker guarda a ultima e
-entrega na hora quando o relogio liga/reconecta.
+Se a API falhar, NAO publica: a mensagem retida anterior continua na tela
+(nunca mostra numero velho como se fosse o atual).
 """
 import json
 import os
-import re
 import sys
-import time
+import urllib.parse
 import urllib.request
 
-SITE = "https://braboscleaning.com/"
 TOKEN = os.environ["FLESPI_TOKEN"]
-PREFIX = "awtrix_9da880"  # prefixo MQTT configurado no relogio
+GOOGLE_KEY = os.environ["GOOGLE_MAPS_API_KEY"]
+PREFIX = "awtrix_9da880"
 APP = "googlereviews"
 
-GREEN = "#8DC63F"   # verde BraBos
-YELLOW = "#FFC400"  # estrelas
-ICON = "23565"      # G colorido fundo preto (ja baixado no relogio)
+PLACE_IDS = [
+    "ChIJJ4WMj8rd1AwRwuQ7FtVQu6g",  # Boston
+    "ChIJu-KuugB544kRbcPZW0m2tM0",  # Newton
+    "ChIJB3RyybVx44kRpE98r82kuNU",  # Cambridge
+]
+
+GREEN = "#8DC63F"
+YELLOW = "#FFC400"
+ICON = "23565"
 
 FONT = {
     "0": ["###", "#.#", "#.#", "#.#", "###"],
@@ -36,17 +42,23 @@ FONT = {
 }
 
 
+def place_total(place_id):
+    """user_ratings_total de um place_id (levanta excecao se falhar)."""
+    url = "https://maps.googleapis.com/maps/api/place/details/json?" + urllib.parse.urlencode(
+        {"place_id": place_id, "fields": "user_ratings_total", "key": GOOGLE_KEY}
+    )
+    req = urllib.request.Request(url, headers={"User-Agent": "brabos-awtrix"})
+    data = json.loads(urllib.request.urlopen(req, timeout=30).read().decode())
+    if data.get("status") != "OK":
+        raise RuntimeError(f"Places API status={data.get('status')} ({place_id})")
+    return int(data["result"]["user_ratings_total"])
+
+
 def get_count():
-    # query unica para furar o cache (LiteSpeed) e ler a versao fresca
-    url = f"{SITE}?nocache={int(time.time())}"
-    req = urllib.request.Request(
-        url, headers={"User-Agent": "Mozilla/5.0", "Cache-Control": "no-cache"}
-    )
-    html = urllib.request.urlopen(req, timeout=30).read().decode("utf-8", "ignore")
-    m = re.search(r"(\d{2,4})\+?\s*Five-Star", html) or re.search(
-        r"With (\d{2,4}) five-star", html, re.I
-    )
-    return m.group(1) if m else None
+    total = sum(place_total(pid) for pid in PLACE_IDS)
+    if not (0 < total <= 9999):  # sanidade
+        raise RuntimeError(f"total implausivel: {total}")
+    return str(total)
 
 
 def build_draw(num):
@@ -72,24 +84,21 @@ def publish(topic, payload):
     req = urllib.request.Request(
         "https://flespi.io/mqtt/messages",
         data=body,
-        headers={
-            "Authorization": "FlespiToken " + TOKEN,
-            "Content-Type": "application/json",
-        },
+        headers={"Authorization": "FlespiToken " + TOKEN, "Content-Type": "application/json"},
         method="POST",
     )
     return urllib.request.urlopen(req, timeout=30).status
 
 
 def main():
-    num = get_count()
-    if not num:
-        print("ERRO: contagem nao encontrada na home")
+    try:
+        num = get_count()
+    except Exception as e:
+        print(f"ERRO ao buscar contagem: {e}")
+        print("Nada publicado -- relogio mantem o ultimo valor (msg retida).")
         sys.exit(1)
 
-    # Mantem apps nativos desligados (resiliente a reboot do relogio)
     publish(f"{PREFIX}/settings", {"TIM": False, "DAT": False, "HUM": False, "TEMP": False, "BAT": False})
-
     app = {"icon": ICON, "background": "000000", "draw": build_draw(num), "duration": 10}
     status = publish(f"{PREFIX}/custom/{APP}", app)
     print(f"OK: {num} reviews publicados (HTTP {status})")
